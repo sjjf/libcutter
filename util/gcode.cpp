@@ -13,6 +13,276 @@
 
 using namespace std;
 
+line::line(const xy &s, const xy &e, const bool c):
+     start(s),
+     end(e),
+     cut(c)
+{
+}
+
+line::~line()
+{
+}
+
+xy line::draw(Device::Generic &cutter)
+{
+     char buf[4096];
+
+     snprintf(buf, sizeof(buf),
+	      "Rapid move from (%f, %f) to (%f, %f)",
+	      start.x, start.y, end.x, end.y);
+     debug_out(info, string(buf));
+     if (cut)
+	  cutter.cut_to(end);
+     else
+	  cutter.move_to(end);
+     snprintf(buf, sizeof(buf),
+	      "Current position: %f, %f",
+	      end.x, end.y);
+     debug_out(debug, string(buf));
+     return end;
+}
+     
+bezier::bezier(const xy &s, const xy &c1, const xy &c2, const xy &e):
+     start(s),
+     cp1(c1),
+     cp2(c2),
+     end(e)
+{
+}
+
+bezier::~bezier()
+{
+}
+
+xy bezier::draw(Device::Generic &cutter)
+{
+     char buf[4096];
+
+     snprintf(buf, sizeof(buf),
+	      "Bezier segment from (%f, %f) to %f, %f)",
+	      start.x, start.y, end.x, end.y);
+     debug_out(info, string(buf));
+     cutter.curve_to(start, cp1, cp2, end);
+     snprintf(buf, sizeof(buf),
+	      "Current position: %f, %f",
+	      end.x, end.y);
+     debug_out(debug, string(buf));
+     return end;
+}
+
+arc::arc(const xy &c, const xy &t, const xy &cv, const bool cw):
+     current(c),
+     target(t),
+     cvec(cv),
+     clockwise(cw),
+     k((4.0/3.0)*(sqrt(2.0) - 1.0))
+{
+     xy tvec;
+
+     cseg = 0;
+
+     center.x = current.x + cvec.x;
+     center.y = current.y + cvec.y;
+			     
+     // target vector and current vector
+     tvec.x = target.x - center.x;
+     tvec.y = target.y - center.y;
+     cvec.x = -(cvec.x);
+     cvec.y = -(cvec.y);
+     radius = sqrt(cvec.x*cvec.x + cvec.y*cvec.y);
+
+     // We implement this using arcs of at most 90 degrees.
+     // For arcs subtending more than 90 degrees we create
+     // a list of 90 degree segments and then a sub-90
+     // degree segment to complete the process.
+     arcwidth = angle_between(tvec, cvec);
+     // this is the angle between the start point and the
+     // x-axis - we create the segments around the x-axis
+     // and origin, then rotate them around the origin and 
+     // translate to the defined center point.
+     xy x_axis;
+     x_axis.x = radius;
+     x_axis.y = 0;
+     double trot = angle_between(x_axis, cvec);
+			     
+     double rem = arcwidth;
+     // this value reduces for each segment, so that we
+     // rotate the first segment to point at curr_pos
+     // then the next one to point at the end of the first
+     // segment, and so on.
+     double srot = trot;
+     while (abs(rem) > M_PI_2 && abs(rem) < 2*M_PI)
+     {
+	  // insert a 90 degree segment, rotated 
+	  segment_right(srot);
+	  rem = rem - M_PI_2;
+	  arcwidth = rem;
+	  srot = srot + M_PI_2;
+     }
+     // final arc segment
+     segment(arcwidth, srot);
+}
+
+arc::~arc()
+{
+}
+
+xy arc::draw(Device::Generic &cutter)
+{
+     char buf[4096];
+
+     snprintf(buf, sizeof(buf),
+	      "Arc from (%f, %f) to (%f, %f)",
+	      current.x, current.y, target.x, target.y);
+     debug_out(info, string(buf));
+
+     xy end;
+     for(int i = 0; i < cseg; i++)
+     {
+	  if(segments[i] != NULL)
+	       end = segments[i]->draw(cutter);
+     }
+
+     if (end.x != target.x || end.y != target.y)
+	  debug_out(warn, "Segment end points do not equal arc end points");
+     snprintf(buf, sizeof(buf),
+	      "Current position: %f, %f",
+	      target.x, target.y);
+     debug_out(debug, string(buf));
+     return target;
+}
+
+// we can treate right angle segments differently, because they can be
+// done with pre-calculated values that are then scaled, rotated and
+// translated
+void arc::segment_right(double rot)
+{
+     char buf[4096];
+     snprintf(buf, 4095,
+	      "Right arc segment: center (%f, %f) radius %f, rotation: %f",
+	      center.x, center.y, radius, rot/M_PI);
+     debug_out(info, string(buf));
+     xy pt1, pt2, pt3, pt4;
+     rot = rot - M_PI_2;
+
+     pt1.x = radius;
+     pt1.y = 0;
+     pt2.x = radius;
+     pt2.y = k*radius;
+     pt3.x = k*radius;
+     pt3.y = radius;
+     pt4.x = 0;
+     pt4.y = radius;
+     
+     // rotate to the right spot
+     double cos_rot = cos(rot);
+     double sin_rot = sin(rot);
+     double a00 = cos_rot;
+     double a01 = -sin_rot;
+     double a10 = sin_rot;
+     double a11 = cos_rot;
+
+     double x, y;
+     x = pt1.x * a00 + a01 * pt1.y;
+     y = pt1.x * a10 + a11 * pt1.y;
+     pt1.x = x;
+     pt1.y = y;
+     x = pt2.x * a00 + a01 * pt2.y;
+     y = pt2.x * a10 + a11 * pt2.y;
+     pt2.x = x;
+     pt2.y = y;
+     x = pt3.x * a00 + a01 * pt3.y;
+     y = pt3.x * a10 + a11 * pt3.y;
+     pt3.x = x;
+     pt3.y = y;
+     x = pt4.x * a00 + a01 * pt4.y;
+     y = pt4.x * a10 + a11 * pt4.y;
+     pt4.x = x;
+     pt4.y = y;
+     pt1.x = pt1.x + center.x;
+     pt1.y = pt1.y + center.y;
+     pt2.x = pt2.x + center.x;
+     pt2.y = pt2.y + center.y;
+     pt3.x = pt3.x + center.x;
+     pt3.y = pt3.y + center.y;
+     pt4.x = pt4.x + center.x;
+     pt4.y = pt4.y + center.y;
+
+     // and put it into production . . .
+     segments[cseg++] =  new bezier( pt1, pt2, pt3, pt4 );
+}
+
+// a single sub-90 degree segment. th0 is the total angle subtended by
+// the arc, r is the arc radius, and rot is the rotation required to move
+// the arc to its final position
+//
+// Reference: http://hansmuller-flex.blogspot.com.au/2011/04/approximating-circular-arc-with-cubic.html
+// (accessed 2014-12-24)
+void arc::segment(double swidth, double rot)
+{
+     char buf[4096];
+     snprintf(buf, 4095,
+	      "Arc segment: center (%f, %f), arc width: %f, radius %f, rotation: %f",
+	      center.x, center.y, swidth/M_PI, radius, rot/M_PI);
+     debug_out(info, string(buf));
+     if ( abs((swidth - M_PI_2)) < 0.00000000001) {
+	  segment_right(rot);
+     }
+     xy pt1, pt2, pt3, pt4;
+     double a = swidth/2;
+     rot = rot - a;
+
+     // construct the arc segment around the x-axis
+     pt4.x = radius*cos(a);
+     pt4.y = radius*sin(a);
+     pt1.x = pt4.x;
+     pt1.y = -pt4.y;
+
+     // get the control points
+     pt2.x = pt1.x + k * tan(a) * pt4.y;
+     pt2.y = pt1.y + k * tan(a) * pt4.x;
+     pt3.x = pt2.x;
+     pt3.y = -pt2.y;
+
+     // rotate to the right spot
+     double cos_rot = cos(rot);
+     double sin_rot = sin(rot);
+     double a00 = cos_rot;
+     double a01 = -sin_rot;
+     double a10 = sin_rot;
+     double a11 = cos_rot;
+
+     double x, y;
+     x = pt1.x * a00 + a01 * pt1.y;
+     y = pt1.x * a10 + a11 * pt1.y;
+     pt1.x = x;
+     pt1.y = y;
+     x = pt2.x * a00 + a01 * pt2.y;
+     y = pt2.x * a10 + a11 * pt2.y;
+     pt2.x = x;
+     pt2.y = y;
+     x = pt3.x * a00 + a01 * pt3.y;
+     y = pt3.x * a10 + a11 * pt3.y;
+     pt3.x = x;
+     pt3.y = y;
+     x = pt4.x * a00 + a01 * pt4.y;
+     y = pt4.x * a10 + a11 * pt4.y;
+     pt4.x = x;
+     pt4.y = y;
+     pt1.x = pt1.x + center.x;
+     pt1.y = pt1.y + center.y;
+     pt2.x = pt2.x + center.x;
+     pt2.y = pt2.y + center.y;
+     pt3.x = pt3.x + center.x;
+     pt3.y = pt3.y + center.y;
+     pt4.x = pt4.x + center.x;
+     pt4.y = pt4.y + center.y;
+
+     // and put it into production . . .
+     segments[cseg++] = new bezier( pt1, pt2, pt3, pt4 );
+}
+
 gcode::gcode(Device::Generic & c):
      cutter(c),
      _debug(crit)
@@ -62,148 +332,39 @@ void gcode::debug_out(enum debug_prio debug_level, const string debug_text)
      }
 }
 
-double angle_between(const xy vec1, const xy vec2)
+void line::debug_out(enum debug_prio debug_level, const string debug_text)
+{
+     if (debug_level <= _debug)
+     {
+	  printf("%s\n", debug_text.c_str());
+     }
+}
+
+void bezier::debug_out(enum debug_prio debug_level, const string debug_text)
+{
+     if (debug_level <= _debug)
+     {
+	  printf("%s\n", debug_text.c_str());
+     }
+}
+
+void arc::debug_out(enum debug_prio debug_level, const string debug_text)
+{
+     if (debug_level <= _debug)
+     {
+	  printf("%s\n", debug_text.c_str());
+     }
+}
+
+double arc::angle_between(const xy & vec1, const xy & vec2)
 {
      // changing to using atan2
      double angle = atan2(vec2.y, vec2.x) - atan2(vec1.y, vec1.x);
-     if (angle < 0)
+     if (angle < -M_PI)
 	  angle = angle + 2*M_PI;
      return angle;
 }
 
-// we can treate right angle segments differently, because they can be
-// done with pre-calculated values that are then scaled, rotated and
-// translated
-void gcode::arc_segment_right(Device::Generic & cutter, const xy & center,
-		       double r, double rot)
-{
-     char buf[4096];
-     snprintf(buf, 4095,
-	      "Right arc segment: center (%f, %f) radius %f, rotation: %f",
-	      center.x, center.y, r, rot/M_PI);
-     debug_out(info, string(buf));
-     double k = (4.0/3.0)*(sqrt(2.0) - 1.0);
-     xy pt1, pt2, pt3, pt4;
-     rot = rot - M_PI_2;
-
-     pt1.x = 0;
-     pt1.y = r;
-     pt2.x = k*r;
-     pt2.y = r;
-     pt3.x = r;
-     pt3.y = k*r;
-     pt4.x = r;
-     pt4.y = 0;
-     
-     // rotate to the right spot
-     double cos_rot = cos(rot);
-     double sin_rot = sin(rot);
-     double a00 = cos_rot;
-     double a01 = -sin_rot;
-     double a10 = sin_rot;
-     double a11 = cos_rot;
-
-     double x, y;
-     x = pt1.x * a00 + a01 * pt1.y;
-     y = pt1.x * a10 + a11 * pt1.y;
-     pt1.x = x;
-     pt1.y = y;
-     x = pt2.x * a00 + a01 * pt2.y;
-     y = pt2.x * a10 + a11 * pt2.y;
-     pt2.x = x;
-     pt2.y = y;
-     x = pt3.x * a00 + a01 * pt3.y;
-     y = pt3.x * a10 + a11 * pt3.y;
-     pt3.x = x;
-     pt3.y = y;
-     x = pt4.x * a00 + a01 * pt4.y;
-     y = pt4.x * a10 + a11 * pt4.y;
-     pt4.x = x;
-     pt4.y = y;
-     pt1.x = pt1.x + center.x;
-     pt1.y = pt1.y + center.y;
-     pt2.x = pt2.x + center.x;
-     pt2.y = pt2.y + center.y;
-     pt3.x = pt3.x + center.x;
-     pt3.y = pt3.y + center.y;
-     pt4.x = pt4.x + center.x;
-     pt4.y = pt4.y + center.y;
-
-     // and put it into production . . .
-     cutter.curve_to( pt1, pt2, pt3, pt4 );
-}
-
-// a single sub-90 degree segment. th0 is the total angle subtended by
-// the arc, r is the arc radius, and rot is the rotation required to move
-// the arc to its final position
-//
-// Reference: http://hansmuller-flex.blogspot.com.au/2011/04/approximating-circular-arc-with-cubic.html
-// (accessed 2014-12-24)
-void gcode::arc_segment( Device::Generic & cutter, const xy & center,
-		  double th0, double r, double rot)
-{
-     char buf[4096];
-     snprintf(buf, 4095,
-	      "Arc segment: center (%f, %f), arc width: %f, radius %f, rotation: %f",
-	      center.x, center.y, th0/M_PI, r, rot/M_PI);
-     debug_out(info, string(buf));
-     if ( abs((th0 - M_PI_2)) < 0.00000000001) {
-	  return arc_segment_right(cutter, center, r, rot);
-     }
-     xy pt1, pt2, pt3, pt4;
-     double k = (4.0/3.0)*(sqrt(2.0) - 1.0);
-     double a = th0/2;
-     rot = rot - a;
-
-     // construct the arc segment around the x-axis
-     pt1.x = r*cos(a);
-     pt1.y = r*sin(a);
-     pt4.x = pt1.x;
-     pt4.y = -pt1.y;
-
-     // get the control points
-     pt3.x = pt4.x + k * tan(a) * pt1.y;
-     pt3.y = pt4.y + k * tan(a) * pt1.x;
-     pt2.x = pt3.x;
-     pt2.y = -pt3.y;
-
-     // rotate to the right spot
-     double cos_rot = cos(rot);
-     double sin_rot = sin(rot);
-     double a00 = cos_rot;
-     double a01 = -sin_rot;
-     double a10 = sin_rot;
-     double a11 = cos_rot;
-
-     double x, y;
-     x = pt1.x * a00 + a01 * pt1.y;
-     y = pt1.x * a10 + a11 * pt1.y;
-     pt1.x = x;
-     pt1.y = y;
-     x = pt2.x * a00 + a01 * pt2.y;
-     y = pt2.x * a10 + a11 * pt2.y;
-     pt2.x = x;
-     pt2.y = y;
-     x = pt3.x * a00 + a01 * pt3.y;
-     y = pt3.x * a10 + a11 * pt3.y;
-     pt3.x = x;
-     pt3.y = y;
-     x = pt4.x * a00 + a01 * pt4.y;
-     y = pt4.x * a10 + a11 * pt4.y;
-     pt4.x = x;
-     pt4.y = y;
-     pt1.x = pt1.x + center.x;
-     pt1.y = pt1.y + center.y;
-     pt2.x = pt2.x + center.x;
-     pt2.y = pt2.y + center.y;
-     pt3.x = pt3.x + center.x;
-     pt3.y = pt3.y + center.y;
-     pt4.x = pt4.x + center.x;
-     pt4.y = pt4.y + center.y;
-
-     // and put it into production . . .
-     cutter.curve_to( pt1, pt2, pt3, pt4 );
-}
 
 //
 // Parsing a line
@@ -236,7 +397,7 @@ void gcode::arc_segment( Device::Generic & cutter, const xy & center,
 // return the remaining unparsed string.
 //
 
-char get_command(const string & input, size_t *rem)
+char gcode::get_command(const string & input, size_t *rem)
 {
      int offset = 0;
      char command;
@@ -249,7 +410,7 @@ char get_command(const string & input, size_t *rem)
      return command;
 }
 
-int get_code(const string & input, size_t *rem)
+int gcode::get_code(const string & input, size_t *rem)
 {
      char *end;
      const char *tmp;
@@ -356,17 +517,8 @@ void gcode::process_movement(string input)
 	  xy target;
 
 	  target = get_target(input, &rem);
-
-	  snprintf(buf, 4095,
-		   "Rapid move from (%f, %f) to (%f, %f)",
-		   curr_pos.x, curr_pos.y, target.x, target.y);
-	  debug_out(info, string(buf));
-	  cutter.move_to(target);
-	  curr_pos = target;
-	  snprintf(buf, 4095,
-		   "Current position: %f, %f",
-		   curr_pos.x, curr_pos.y);
-	  debug_out(debug, string(buf));
+	  line *l = new line(curr_pos, target, false);
+	  curr_pos = l->draw(cutter);
      }
      else
      {
@@ -401,17 +553,8 @@ void gcode::process_line(string input)
 	  xy target;
 
 	  target = get_target(input, &rem);
-
-	  snprintf(buf, 4095,
-		   "Cutting from (%f, %f) to (%f, %f)",
-		   curr_pos.x, curr_pos.y, target.x, target.y);
-	  debug_out(info, string(buf));
-	  cutter.cut_to(target);
-	  curr_pos = target;
-	  snprintf(buf, 4095,
-		   "Current position: %f, %f",
-		   curr_pos.x, curr_pos.y);
-	  debug_out(debug, string(buf));
+	  line *l = new line(curr_pos, target, true);
+	  curr_pos = l->draw(cutter);
      }
      else
      {
@@ -441,57 +584,13 @@ void gcode::process_clockwise_arc(string input)
      else if(command == 'X')
      {
 	  xy target, cvec;
-	  xy center, tvec;
 	  
+	  debug_out(debug, "Processing clockwise arc");
 	  target = get_target(input, &rem);
 	  cvec = get_vector(input.substr(rem), &rem);
 
-	  center.x = curr_pos.x + cvec.x;
-	  center.y = curr_pos.y + cvec.y;
-			     
-	  // target vector and current vector
-	  tvec.x = target.x - center.x;
-	  tvec.y = target.y - center.y;
-	  cvec.x = -(cvec.x);
-	  cvec.y = -(cvec.y);
-	  double radius = sqrt(cvec.x*cvec.x + cvec.y*cvec.y);
-
-	  // We implement this using arcs of at most 90 degrees.
-	  // For arcs subtending more than 90 degrees we create
-	  // a list of 90 degree segments and then a sub-90
-	  // degree segment to complete the process.
-	  double arcwidth = angle_between(tvec, cvec);
-	  // this is the angle between the start point and the
-	  // x-axis - we create the segments around the x-axis
-	  // and origin, then rotate them around the origin and 
-	  // translate to the defined center point.
-	  xy x_axis;
-	  x_axis.x = radius;
-	  x_axis.y = 0;
-	  double trot = angle_between(x_axis, cvec);
-			     
-	  double rem = arcwidth;
-	  // this value reduces for each segment, so that we
-	  // rotate the first segment to point at curr_pos
-	  // then the next one to point at the end of the first
-	  // segment, and so on.
-	  double srot = trot;
-	  while (abs(rem) > M_PI_2 && abs(rem) < 2*M_PI)
-	  {
-	       // insert a 90 degree segment, rotated 
-	       arc_segment_right(cutter, center, radius, srot);
-	       rem = rem - M_PI_2;
-	       arcwidth = rem;
-	       srot = srot - M_PI_2;
-	  }
-	  // final arc segment
-	  arc_segment(cutter, center, arcwidth, radius, srot);
-	  curr_pos = target;
-	  char buf[4096];
-	  snprintf(buf, 4095,
-		   "Current position: %f, %f",
-		   curr_pos.x, curr_pos.y);
-	  debug_out(debug, string(buf));
+	  arc *a = new arc(curr_pos, target, cvec, true);
+	  curr_pos = a->draw(cutter);
      }
      parse_line(input.substr(rem));
 	  

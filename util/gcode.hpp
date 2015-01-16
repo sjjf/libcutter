@@ -28,18 +28,78 @@ enum debug_prio {
      extra_debug
 };
 
+// These are private utility classes
+class line
+{
+     xy start, end;
+     bool cut;
+     enum debug_prio _debug;
+     void debug_out(enum debug_prio, string);
+
+public:
+     line(const xy &, const xy &, const bool);
+     ~line();
+     xy draw(Device::Generic &);
+};
+
+class bezier
+{
+     // start, end and control points
+     xy start, cp1, cp2, end;
+     enum debug_prio _debug;
+     void debug_out(enum debug_prio, string);
+
+public:
+     bezier(const xy &, const xy &, const xy &, const xy &);
+     ~bezier();
+     xy draw(Device::Generic &);
+};
+
+class arc
+{
+     // the g-code supplied values
+     xy current, target;
+     xy cvec;
+     bool clockwise;
+     const double k;
+
+     // derived values defining the arc
+     xy center;
+     double radius, arcwidth, rotation;
+     
+     // we're implementing this as a 4-segment circle, so this is
+     // appropriate
+     bezier *segments[4];
+     int cseg;
+
+     // calculate the segments
+     void segment_right(double rot);
+     void segment(double swidth, double rot);
+
+     enum debug_prio _debug;
+     void debug_out(enum debug_prio, string);
+
+     // utility - ideally this would be done as part of an xy class,
+     // but I don't want to  make such a large change right now
+     double angle_between(const xy &, const xy &);
+
+public:
+     arc(const xy &, const xy &, const xy &, const bool);
+     arc(const xy &, double, double, double);
+     ~arc();
+     xy draw(Device::Generic &);
+};
+
 class gcode
 {
-     // utility methods - methods, so that they can access private
-     // members and stuff
+     // parse methods
      double doc_to_internal(double);
+     char get_command(const string &, size_t *);
+     int get_code(const string &, size_t *);
      double get_value(const string &, size_t *);
      xy get_xy(const string &, size_t *);
      xy get_vector(const string, size_t *);
      xy get_target(const string, size_t *);
-     void debug_out(int, const string);
-     void arc_segment_right(Device::Generic &, const xy &, double, double);
-     void arc_segment(Device::Generic &, const xy &, double, double, double);
 
      // private stuff - methods so that they can access the private
      // methods and members
