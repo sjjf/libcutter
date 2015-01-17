@@ -16,8 +16,14 @@ using namespace std;
 line::line(const xy &s, const xy &e, const bool c):
      start(s),
      end(e),
-     cut(c)
+     cut(c),
+     _debug(crit)
 {
+     char buf[4096];
+     snprintf(buf, sizeof(buf),
+	      "New line: start (%f, %f), end (%f, %f) cut %s",
+	      start.x, start.y, end.x, end.y, cut ? "true": "false");
+     debug_out(extra_debug, string(buf));
 }
 
 line::~line()
@@ -29,13 +35,16 @@ xy line::draw(Device::Generic &cutter)
      char buf[4096];
 
      snprintf(buf, sizeof(buf),
-	      "Rapid move from (%f, %f) to (%f, %f)",
+	      "%s from (%f, %f) to (%f, %f)",
+	      cut ? "Line" : "Rapid move",
 	      start.x, start.y, end.x, end.y);
      debug_out(info, string(buf));
+
      if (cut)
 	  cutter.cut_to(end);
      else
 	  cutter.move_to(end);
+
      snprintf(buf, sizeof(buf),
 	      "Current position: %f, %f",
 	      end.x, end.y);
@@ -47,8 +56,14 @@ bezier::bezier(const xy &s, const xy &c1, const xy &c2, const xy &e):
      start(s),
      cp1(c1),
      cp2(c2),
-     end(e)
+     end(e),
+     _debug(crit)
 {
+     char buf[4096];
+     snprintf(buf, sizeof(buf),
+	      "New bezier from (%f, %f) to (%f, %f)\n",
+	      start.x, start.y, end.x, end.y);
+     debug_out(extra_debug, string(buf));
 }
 
 bezier::~bezier()
@@ -60,12 +75,12 @@ xy bezier::draw(Device::Generic &cutter)
      char buf[4096];
 
      snprintf(buf, sizeof(buf),
-	      "Bezier segment from (%f, %f) to %f, %f)",
+	      "Bezier segment from (%f, %f) to (%f, %f)",
 	      start.x, start.y, end.x, end.y);
      debug_out(info, string(buf));
      cutter.curve_to(start, cp1, cp2, end);
      snprintf(buf, sizeof(buf),
-	      "Current position: %f, %f",
+	      "Current position: (%f, %f)",
 	      end.x, end.y);
      debug_out(debug, string(buf));
      return end;
@@ -76,16 +91,24 @@ arc::arc(const xy &c, const xy &t, const xy &cv, const bool cw):
      target(t),
      cvec(cv),
      clockwise(cw),
-     k((4.0/3.0)*(sqrt(2.0) - 1.0))
+     k((4.0/3.0)*(sqrt(2.0) - 1.0)),
+     _debug(crit)
 {
-     xy tvec;
+     char buf[4096];
+     snprintf(buf, sizeof(buf),
+	      "New %s arc from (%f, %f) to (%f, %f)\n",
+	      clockwise ? "clockwise" : "anticlockwise",
+	      current.x, current.y, target.x, target.y);
+     debug_out(extra_debug, string(buf));
 
      cseg = 0;
 
      center.x = current.x + cvec.x;
      center.y = current.y + cvec.y;
 			     
+
      // target vector and current vector
+     xy tvec;
      tvec.x = target.x - center.x;
      tvec.y = target.y - center.y;
      cvec.x = -(cvec.x);
@@ -96,7 +119,8 @@ arc::arc(const xy &c, const xy &t, const xy &cv, const bool cw):
      // For arcs subtending more than 90 degrees we create
      // a list of 90 degree segments and then a sub-90
      // degree segment to complete the process.
-     arcwidth = angle_between(tvec, cvec);
+     arcwidth = abs(angle_between(tvec, cvec));
+
      // this is the angle between the start point and the
      // x-axis - we create the segments around the x-axis
      // and origin, then rotate them around the origin and 
@@ -105,23 +129,22 @@ arc::arc(const xy &c, const xy &t, const xy &cv, const bool cw):
      x_axis.x = radius;
      x_axis.y = 0;
      double trot = angle_between(x_axis, cvec);
-			     
-     double rem = arcwidth;
+
      // this value reduces for each segment, so that we
      // rotate the first segment to point at curr_pos
      // then the next one to point at the end of the first
      // segment, and so on.
      double srot = trot;
-     while (abs(rem) > M_PI_2 && abs(rem) < 2*M_PI)
+     double rem = arcwidth;
+     while (rem > M_PI_2)
      {
 	  // insert a 90 degree segment, rotated 
 	  segment_right(srot);
-	  rem = rem - M_PI_2;
-	  arcwidth = rem;
-	  srot = srot + M_PI_2;
+	  rem -= M_PI_2;
+	  srot += M_PI_2;
      }
      // final arc segment
-     segment(arcwidth, srot);
+     segment(rem, srot);
 }
 
 arc::~arc()
@@ -144,10 +167,11 @@ xy arc::draw(Device::Generic &cutter)
 	       end = segments[i]->draw(cutter);
      }
 
-     if (end.x != target.x || end.y != target.y)
+     if (abs(end.x - target.x) > 0.000001 ||
+	 abs(end.y - target.y) > 0.000001)
 	  debug_out(warn, "Segment end points do not equal arc end points");
      snprintf(buf, sizeof(buf),
-	      "Current position: %f, %f",
+	      "Current position: (%f, %f)",
 	      target.x, target.y);
      debug_out(debug, string(buf));
      return target;
@@ -162,18 +186,33 @@ void arc::segment_right(double rot)
      snprintf(buf, 4095,
 	      "Right arc segment: center (%f, %f) radius %f, rotation: %f",
 	      center.x, center.y, radius, rot/M_PI);
-     debug_out(info, string(buf));
+     debug_out(debug, string(buf));
      xy pt1, pt2, pt3, pt4;
      rot = rot - M_PI_2;
 
-     pt1.x = radius;
-     pt1.y = 0;
-     pt2.x = radius;
-     pt2.y = k*radius;
-     pt3.x = k*radius;
-     pt3.y = radius;
-     pt4.x = 0;
-     pt4.y = radius;
+     if (clockwise)
+     {
+	  pt1.x = radius;
+	  pt1.y = 0;
+	  pt2.x = radius;
+	  pt2.y = k*radius;
+	  pt3.x = k*radius;
+	  pt3.y = radius;
+	  pt4.x = 0;
+	  pt4.y = radius;
+     }
+     else
+     {
+	  rot = -rot;
+	  pt4.x = radius;
+	  pt4.y = 0;
+	  pt3.x = radius;
+	  pt3.y = k*radius;
+	  pt2.x = k*radius;
+	  pt2.y = radius;
+	  pt1.x = 0;
+	  pt1.y = radius;
+     }
      
      // rotate to the right spot
      double cos_rot = cos(rot);
@@ -225,7 +264,7 @@ void arc::segment(double swidth, double rot)
      snprintf(buf, 4095,
 	      "Arc segment: center (%f, %f), arc width: %f, radius %f, rotation: %f",
 	      center.x, center.y, swidth/M_PI, radius, rot/M_PI);
-     debug_out(info, string(buf));
+     debug_out(debug, string(buf));
      if ( abs((swidth - M_PI_2)) < 0.00000000001) {
 	  segment_right(rot);
      }
@@ -233,17 +272,34 @@ void arc::segment(double swidth, double rot)
      double a = swidth/2;
      rot = rot - a;
 
-     // construct the arc segment around the x-axis
-     pt4.x = radius*cos(a);
-     pt4.y = radius*sin(a);
-     pt1.x = pt4.x;
-     pt1.y = -pt4.y;
-
+     if (clockwise)
+     {
+	  // construct the arc segment around the x-axis
+	  pt4.x = radius*cos(a);
+	  pt4.y = radius*sin(a);
+	  pt1.x = pt4.x;
+	  pt1.y = -pt4.y;
      // get the control points
-     pt2.x = pt1.x + k * tan(a) * pt4.y;
-     pt2.y = pt1.y + k * tan(a) * pt4.x;
-     pt3.x = pt2.x;
-     pt3.y = -pt2.y;
+	  pt2.x = pt1.x + k * tan(a) * pt4.y;
+	  pt2.y = pt1.y + k * tan(a) * pt4.x;
+	  pt3.x = pt2.x;
+	  pt3.y = -pt2.y;
+     }
+     else
+     {
+	  rot = -rot;
+	  // construct the arc segment around the x-axis
+	  pt1.x = radius*cos(a);
+	  pt1.y = radius*sin(a);
+	  pt4.x = pt1.x;
+	  pt4.y = -pt1.y;
+	  // get the control points
+	  pt3.x = pt4.x + k * tan(a) * pt1.y;
+	  pt3.y = pt4.y + k * tan(a) * pt1.x;
+	  pt2.x = pt3.x;
+	  pt2.y = -pt3.y;
+     }
+
 
      // rotate to the right spot
      double cos_rot = cos(rot);
@@ -472,10 +528,18 @@ xy gcode::get_xy(const string & input, size_t *rem)
 xy gcode::get_vector(const string input, size_t *rem)
 {
      char command;
+     size_t offset = 0;
+     size_t tmp;
 
-     command = get_command(input, rem);
+     command = get_command(input, &tmp);
+     offset += tmp;
      if(command == 'I')
-	  return get_xy(input, rem);
+     {
+	  xy t = get_xy(input, &tmp);
+	  offset += tmp;
+	  *rem = offset;
+	  return t;
+     }
      string msg = "Expected vector, got: ";
      msg.append(input);
      throw msg;
@@ -506,7 +570,7 @@ void gcode::process_movement(string input)
      {
 	  double z = get_value(input.substr(rem), &rem);
 	  snprintf(buf, 4095, "Pen %s", (z >= 0) ? "up":"down");
-	  debug_out(info, string(buf));
+	  debug_out(debug, string(buf));
 	  if(z >= 0)
 	       raise_pen();
 	  else
@@ -533,16 +597,19 @@ void gcode::process_line(string input)
 {
      // cut from curr_pos to target_point
 
-     size_t rem = 0;
+     size_t offset = 0;
+     size_t rem;
      char command;
      char buf[4096];
 
      command = get_command(input, &rem);
+     offset += rem;
      if(command == 'Z')
      {
 	  double z = get_value(input.substr(rem), &rem);
+	  offset += rem;
 	  snprintf(buf, 4095, "Pen %s", (z >= 0) ? "up":"down");
-	  debug_out(info, string(buf));
+	  debug_out(debug, string(buf));
 	  if(z >= 0)
 	       raise_pen();
 	  else
@@ -553,6 +620,7 @@ void gcode::process_line(string input)
 	  xy target;
 
 	  target = get_target(input, &rem);
+	  offset += rem;
 	  line *l = new line(curr_pos, target, true);
 	  curr_pos = l->draw(cutter);
      }
@@ -562,7 +630,7 @@ void gcode::process_line(string input)
 	  msg.append(input);
 	  throw msg;
      }
-     parse_line(input.substr(rem));
+     parse_line(input.substr(offset));
 }
 
 void gcode::process_clockwise_arc(string input)
@@ -571,10 +639,12 @@ void gcode::process_clockwise_arc(string input)
      // a center point defined by the vector (i, j) from the current
      // position
 
-     size_t rem = 0;
+     size_t offset = 0;
+     size_t rem;
      char command;
      
      command = get_command(input, &rem);
+     offset += rem;
      if(command == 'Z')
      {
 	  string msg = "Unexpected Z command: ";
@@ -587,17 +657,49 @@ void gcode::process_clockwise_arc(string input)
 	  
 	  debug_out(debug, "Processing clockwise arc");
 	  target = get_target(input, &rem);
+	  offset += rem;
 	  cvec = get_vector(input.substr(rem), &rem);
+	  offset += rem;
 
 	  arc *a = new arc(curr_pos, target, cvec, true);
 	  curr_pos = a->draw(cutter);
      }
-     parse_line(input.substr(rem));
+     parse_line(input.substr(offset));
 	  
 }
 
 void gcode::process_anticlockwise_arc(string input)
 {
+    // cut in an anticlockwise circular arc from curr_pos to target
+    // around a center point defined by the vector (i, j) from the
+    // current position
+
+    size_t offset = 0;
+    size_t rem;
+    char command;
+
+    command = get_command(input, &rem);
+    offset += rem;
+    if(command == 'Z')
+    {
+	 string msg = "Unexpected Z command: ";
+	 msg.append(input);
+	 throw msg;
+    }
+    else if(command == 'X')
+    {
+	 xy target, cvec;
+
+	 debug_out(debug, "Processing anticlockwise arc");
+	 target = get_target(input, &rem);
+	 offset += rem;
+	 cvec = get_vector(input.substr(rem), &rem);
+	 offset += rem;
+	 arc *a = new arc(curr_pos, target, cvec, false);
+	 curr_pos = a->draw(cutter);
+
+     }
+     parse_line(input.substr(offset));
 }
 
 void gcode::process_g_code(string input)
@@ -652,7 +754,7 @@ void gcode::process_g_code(string input)
      default:
 	  string msg = "Unhandled G command: ";
 	  msg.append(input);
-	  debug_out(info, msg);
+	  debug_out(debug, msg);
 	  break;
      }
      parse_line(input.substr(rem));
@@ -709,7 +811,7 @@ void gcode::process_misc_code(string input)
      default:
 	  string msg = "Unhandled M command ";
 	  msg.append(input);
-	  debug_out(info, msg);
+	  debug_out(debug, msg);
 	  break;
      }
      
@@ -721,7 +823,7 @@ void gcode::parse_line(string input)
      size_t rem = 0;
      char buf[4096];
      snprintf(buf, 4095, "Processing line: %s", input.c_str());
-     debug_out(debug, string(buf));
+     debug_out(extra_debug, string(buf));
      if(input[0] == '\n')
 	  throw true;
 
@@ -747,10 +849,14 @@ void gcode::parse_line(string input)
      case ';':
 	  break;
 
+     case '\n':
+     case '\0':
+	  break;
+
      default:
 	  string msg = "Unhandled command ";
 	  msg.append(input);
-	  debug_out(info, msg);
+	  debug_out(debug, msg);
 	  break;
      }
 }
@@ -777,7 +883,7 @@ void gcode::parse_file(void)
 	  {
 	       // sadly, this seems to be the most reliable way to
 	       // tell that we've reached the end of the line
-	       debug_out(debug, "Got out of range error");
+	       debug_out(extra_debug, "Got out of range error");
 	  }
 	  catch(bool completed)
 	  {
@@ -787,7 +893,7 @@ void gcode::parse_file(void)
 	       // otherwise the line is done
 	  }
      }
-     debug_out(warn, "Parse complete");
+     debug_out(info, "Parse complete");
      return;
 }
 	  

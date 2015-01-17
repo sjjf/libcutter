@@ -8,13 +8,10 @@
 
 using namespace std;
 
-#ifndef DEBUG_MSG
-#define DEBUG_MSG
-const string debug_msg = "\n"							\
+static const string debug_msg = "\n"							\
      "Debug level goes from 0 (only show the most critical messages\n"	\
      "to 5 (output lots of extra debugging information). The default\n"	\
      "is 1 (only show error messages)\n";
-#endif
 
 // For historical reasons we use inches internally
 const double MM_PER_INCH = 25.4;
@@ -26,6 +23,15 @@ enum debug_prio {
      info,
      debug,
      extra_debug
+};
+
+static const char *debug_strings[] = {
+     "critical",
+     "error",
+     "warning",
+     "information",
+     "debug",
+     "extra_debug"
 };
 
 // These are private utility classes
@@ -61,7 +67,6 @@ class arc
      xy current, target;
      xy cvec;
      bool clockwise;
-     const double k;
 
      // derived values defining the arc
      xy center;
@@ -69,8 +74,10 @@ class arc
      
      // we're implementing this as a 4-segment circle, so this is
      // appropriate
+     const double k;
      bezier *segments[4];
      int cseg;
+     double crot;
 
      // calculate the segments
      void segment_right(double rot);
@@ -168,6 +175,8 @@ public:
      inline void set_debug(enum debug_prio d)
 	  {
 	       _debug = d;
+	       printf("Debugging level set to %s\n",
+		      debug_strings[_debug]);
 	  }
 
 };

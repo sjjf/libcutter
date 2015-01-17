@@ -11,12 +11,6 @@
 
 using namespace std;
 
-//DEBUG LEVELS:
-//0 - No debug output
-//1 - StringConversion
-//2 - Each line of GCODE as parsed
-#define DEBUG 0
-
 #include "gcode.hpp"
 
 void usage(char *progname)
@@ -40,7 +34,6 @@ int main( int num_args, char * args[] )
 	       // get the subsequent integer debug priority
 	       // value
 	       d = (enum debug_prio)strtol(args[2], NULL, 10);
-	       printf("Debugging level set to %d\n", d);
 	       arg_start = 3;
 	  }
 	  else
