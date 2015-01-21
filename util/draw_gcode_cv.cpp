@@ -47,7 +47,7 @@ int main( int num_args, char * args[] )
 
      Device::CV_sim cutter( args[arg_start++] );
      gcode parser(args[arg_start++], cutter);
-     parser.set_debug(d);
+     gcode_base::set_debug(d);
 
      cutter.stop();
      cutter.start();

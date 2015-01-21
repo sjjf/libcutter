@@ -3,7 +3,7 @@
 
 #include <cstring>
 #include <string>
-#include "device_c.hpp"
+#include "device.hpp"
 #include "types.h"
 
 using namespace std;
@@ -14,7 +14,7 @@ static const string debug_msg = "\n"							\
      "is 1 (only show error messages)\n";
 
 // For historical reasons we use inches internally
-const double MM_PER_INCH = 25.4;
+static const double MM_PER_INCH = 25.4;
 
 enum debug_prio {
      crit = 0,
@@ -25,22 +25,17 @@ enum debug_prio {
      extra_debug
 };
 
-static const char *debug_strings[] = {
-     "critical",
-     "error",
-     "warning",
-     "information",
-     "debug",
-     "extra_debug"
-};
+namespace gcode_base
+{
+     void debug_out(enum debug_prio, const string);
+     void set_debug(enum debug_prio);
+}
 
 // These are private utility classes
 class line
 {
      xy start, end;
      bool cut;
-     enum debug_prio _debug;
-     void debug_out(enum debug_prio, string);
 
 public:
      line(const xy &, const xy &, const bool);
@@ -52,8 +47,6 @@ class bezier
 {
      // start, end and control points
      xy start, cp1, cp2, end;
-     enum debug_prio _debug;
-     void debug_out(enum debug_prio, string);
 
 public:
      bezier(const xy &, const xy &, const xy &, const xy &);
@@ -80,15 +73,12 @@ class arc
      double crot;
 
      // calculate the segments
-     void segment_right(double rot);
      void segment(double swidth, double rot);
-
-     enum debug_prio _debug;
-     void debug_out(enum debug_prio, string);
 
      // utility - ideally this would be done as part of an xy class,
      // but I don't want to  make such a large change right now
      double angle_between(const xy &, const xy &);
+     double get_arcwidth(const xy &, const xy &);
 
 public:
      arc(const xy &, const xy &, const xy &, const bool);
@@ -119,8 +109,6 @@ class gcode
      void process_parens(string);
      void process_misc_code(string);
 
-     void debug_out(enum debug_prio, string);
-
      inline void raise_pen(void)
 	  {
 	       pen_up = true;
@@ -146,9 +134,6 @@ class gcode
      bool metric;
      bool absolute;
 
-     // by default, only print critical stuff
-     enum debug_prio _debug;
-
 public:
      gcode(Device::Generic &);
      gcode( const  std::string &, Device::Generic & );
@@ -172,12 +157,5 @@ public:
 	  {
 	       return absolute;
 	  }
-     inline void set_debug(enum debug_prio d)
-	  {
-	       _debug = d;
-	       printf("Debugging level set to %s\n",
-		      debug_strings[_debug]);
-	  }
-
 };
 #endif
