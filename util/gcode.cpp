@@ -116,7 +116,6 @@ xy bezier::draw(Device::Generic &cutter)
 double arc::angle_between(const xy &vec1, const xy &vec2)
 {
      double angle = atan2(vec2.y, vec2.x) - atan2(vec1.y, vec1.x);
-     printf("Angle between: %f\n", angle/M_PI);
 
      return angle;
 }
@@ -130,30 +129,24 @@ double arc::get_arcwidth(const xy & vec1, const xy & vec2)
      // angle with vec1 flipped by M_PI degrees (by simply negating
      // both components).
 
+//     printf("vec1: (%f, %f); vec2: (%f, %f)\n",vec1.x, vec1.y,
+//	    vec2.x, vec2.y);
      double a1 = atan2(vec2.y, vec2.x) - atan2(vec1.y, vec1.x);
-     double a2 = atan2(vec2.y, vec2.x) - atan2(-vec1.y, -vec1.x);
-     printf("Arcwidth: %f, negated: %f", a1/M_PI, a2/M_PI);
+//     printf("Arcwidth: %f", a1/M_PI);
      
-     if ((a1 >= 0.0 && a2 >= 0.0) ||
-	 (a1 <= 0.0 && a2 <= 0.0))
+     if (clockwise)
      {
-	  printf("(small angle) Final: %f\n", a1/M_PI);
-	  return a1;
+//	  printf(" (clockwise) ");
+	  if (a1 > 0)
+	       a1 = a1 - 2*M_PI;
      }
      else
      {
-	  if (clockwise)
-	  {
-	       printf(" (clockwise) ");
-	       a1 = a1 - M_PI;
-	  }
-	  else
-	  {
-	       printf(" (anticlockwise) ");
-	       a1 = a1 + M_PI;
-	  }
-	  printf(" Final: %f\n", a1/M_PI);
+//	  printf(" (anticlockwise) ");
+	  if (a1 < 0)
+	       a1 = a1 + 2*M_PI;
      }
+//     printf(" Final: %f\n", a1/M_PI);
      return a1;
 }
 
@@ -188,7 +181,7 @@ arc::arc(const xy &c, const xy &t, const xy &cv, const bool cw):
      // For arcs subtending more than 90 degrees we create
      // a list of 90 degree segments and then a sub-90
      // degree segment to complete the process.
-     arcwidth = abs(get_arcwidth(tvec, cvec));
+     arcwidth = abs(get_arcwidth(cvec, tvec));
 
      // this is the angle between the start point and the
      // x-axis - we create the segments around the x-axis
@@ -198,7 +191,6 @@ arc::arc(const xy &c, const xy &t, const xy &cv, const bool cw):
      x_axis.x = radius;
      x_axis.y = 0;
      crot = angle_between(x_axis, cvec);
-     printf("crot: %f\n", crot/M_PI);
 
      // we rotate each segment so that the start point of the segment
      // is at the same angle as the current point, then we increment
@@ -261,9 +253,6 @@ void arc::segment(double swidth, double rot)
      debug_out(debug, string(buf));
      xy pt1, pt2, pt3, pt4;
      double a = swidth/2;
-     double brot = crot - a;
-     printf("brot: %f\n", brot/M_PI);
-     printf("rot: %f\n", rot/M_PI);
 
      if (clockwise)
      {
@@ -302,7 +291,6 @@ void arc::segment(double swidth, double rot)
 	  // or rot + crot + a
 	  rot = rot + crot + a;
      }
-     printf("rot: %f\n", rot/M_PI);
 
      // rotate to the right spot
      double cos_rot = cos(rot);
